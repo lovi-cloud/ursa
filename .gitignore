@@ -2,5 +2,5 @@
 *.yml
 
 /cmd/ursa/ursa
-
+/cmd/ursa/static
 /assets

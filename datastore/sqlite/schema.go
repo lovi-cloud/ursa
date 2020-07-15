@@ -3,13 +3,11 @@ package sqlite
 var tables = map[string]string{
 	"subnet": `CREATE TABLE IF NOT EXISTS subnet(
 id INTEGER PRIMARY KEY,
-gateway TEXT NOT NULL,
-netmask TEXT NOT NULL,
-my_address TEXT NOT NULL,
+network TEXT NOT NULL UNIQUE,
 start TEXT NOT NULL UNIQUE,
 end TEXT NOT NULL UNIQUE,
-dns_server TEXT NOT NULL UNIQUE, 
-UNIQUE(gateway, netmask)
+gateway TEXT UNIQUE,
+dns_server TEXT 
 )`,
 	"lease": `CREATE TABLE IF NOT EXISTS lease(
 id INTEGER PRIMARY KEY AUTOINCREMENT,

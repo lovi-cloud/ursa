@@ -7,17 +7,19 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/go-test/deep"
-
 	// SQLite driver
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/whywaita/ursa/config"
 	"github.com/whywaita/ursa/datastore"
 	"github.com/whywaita/ursa/dhcpd"
 	"github.com/whywaita/ursa/types"
+)
+
+const (
+	managementSubnetID = 0
+	serviceSubnetID    = 1
 )
 
 // SQLite is
@@ -26,7 +28,7 @@ type SQLite struct {
 }
 
 // New is
-func New(ctx context.Context, dsn string, conf config.Config) (datastore.Datastore, error) {
+func New(ctx context.Context, dsn string) (datastore.Datastore, error) {
 	db, err := sqlx.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite connection: %w", err)
@@ -37,32 +39,13 @@ func New(ctx context.Context, dsn string, conf config.Config) (datastore.Datasto
 		return nil, err
 	}
 
-	ds := &SQLite{
+	return &SQLite{
 		db: db,
-	}
-	for _, subnet := range conf.Subnets {
-		currentSubnet, err := ds.GetSubnetByID(ctx, subnet.ID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				_, err = ds.CreateSubnet(ctx, subnet)
-				if err != nil {
-					return nil, err
-				}
-				continue
-			}
-			return nil, err
-		}
-		if diff := deep.Equal(subnet, *currentSubnet); len(diff) != 0 {
-			return nil, fmt.Errorf("invalid: %+v", diff)
-		}
-	}
-
-	return ds, nil
+	}, nil
 }
 
-// GetSubnetByID is
-func (s *SQLite) GetSubnetByID(ctx context.Context, subnetID int) (*dhcpd.Subnet, error) {
-	query := `SELECT id, gateway, netmask, my_address, start, end, dns_server FROM subnet WHERE id = ?`
+func (s *SQLite) getSubnetByID(ctx context.Context, subnetID int) (*dhcpd.Subnet, error) {
+	query := `SELECT id, network, start, end, gateway, dns_server FROM subnet WHERE id = ?`
 	stmt, err := s.db.Preparex(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
@@ -75,34 +58,51 @@ func (s *SQLite) GetSubnetByID(ctx context.Context, subnetID int) (*dhcpd.Subnet
 	return &subnet, nil
 }
 
-// GetSubnetByMyAddress is
-func (s *SQLite) GetSubnetByMyAddress(ctx context.Context, myAddr types.IP) (*dhcpd.Subnet, error) {
-	query := `SELECT id, gateway, netmask, my_address, start, end, dns_server FROM subnet WHERE my_address = ?`
-	stmt, err := s.db.Preparex(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	var subnet dhcpd.Subnet
-	err = stmt.GetContext(ctx, &subnet, myAddr)
-	if err != nil {
-		fmt.Printf("%+v\n", myAddr)
-		return nil, fmt.Errorf("failed to get subnet: %w", err)
-	}
-	return &subnet, nil
+// GetManagementSubnet is
+func (s *SQLite) GetManagementSubnet(ctx context.Context) (*dhcpd.Subnet, error) {
+	return s.getSubnetByID(ctx, managementSubnetID)
 }
 
-// CreateSubnet is
-func (s *SQLite) CreateSubnet(ctx context.Context, subnet dhcpd.Subnet) (*dhcpd.Subnet, error) {
-	query := `INSERT INTO subnet(id, gateway, netmask, my_address, start, end, dns_server) VALUES(?, ?, ?, ?, ?, ?, ?)`
+// GetServiceSubnet is
+func (s *SQLite) GetServiceSubnet(ctx context.Context) (*dhcpd.Subnet, error) {
+	return s.getSubnetByID(ctx, serviceSubnetID)
+}
+
+func (s *SQLite) createSubnet(ctx context.Context, subnet dhcpd.Subnet) (*dhcpd.Subnet, error) {
+	query := `INSERT INTO subnet(id, network, start, end, gateway, dns_server) VALUES(?, ?, ?, ?, ?, ?)`
 	stmt, err := s.db.Preparex(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare stetment: %w", err)
 	}
-	_, err = stmt.ExecContext(ctx, subnet.ID, subnet.Gateway, subnet.Netmask, subnet.MyAddress, subnet.Start, subnet.End, subnet.DNSServer)
+	_, err = stmt.ExecContext(ctx, subnet.ID, subnet.Network, subnet.Start, subnet.End, subnet.Gateway, subnet.DNSServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new subnet: %w", err)
 	}
 	return &subnet, nil
+}
+
+// CreateManagementSubnet is
+func (s *SQLite) CreateManagementSubnet(ctx context.Context, network types.IPNet, start, end types.IP) (*dhcpd.Subnet, error) {
+	return s.createSubnet(ctx, dhcpd.Subnet{
+		ID:        managementSubnetID,
+		Network:   network,
+		Start:     start,
+		End:       end,
+		Gateway:   nil,
+		DNSServer: nil,
+	})
+}
+
+// CreateServiceSubnet is
+func (s *SQLite) CreateServiceSubnet(ctx context.Context, network types.IPNet, start, end, gateway, dnsServer types.IP) (*dhcpd.Subnet, error) {
+	return s.createSubnet(ctx, dhcpd.Subnet{
+		ID:        serviceSubnetID,
+		Network:   network,
+		Start:     start,
+		End:       end,
+		Gateway:   &gateway,
+		DNSServer: &dnsServer,
+	})
 }
 
 // GetLease is
@@ -121,13 +121,11 @@ func (s *SQLite) GetLease(ctx context.Context, mac types.HardwareAddr) (*dhcpd.L
 	return &lease, nil
 }
 
-// CreateLease is
-func (s *SQLite) CreateLease(ctx context.Context, subnetID int, mac types.HardwareAddr) (*dhcpd.Lease, error) {
-	subnet, err := s.GetSubnetByID(ctx, subnetID)
+func (s *SQLite) createLease(ctx context.Context, subnetID int, mac types.HardwareAddr) (*dhcpd.Lease, error) {
+	subnet, err := s.getSubnetByID(ctx, subnetID)
 	if err != nil {
 		return nil, err
 	}
-
 	tx, err := s.db.Beginx()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start transaction: %w", err)
@@ -172,6 +170,16 @@ func (s *SQLite) CreateLease(ctx context.Context, subnetID int, mac types.Hardwa
 		IPAddress:  next,
 		SubnetID:   subnetID,
 	}, nil
+}
+
+// CreateLeaseFromManagementSubnet is
+func (s *SQLite) CreateLeaseFromManagementSubnet(ctx context.Context, mac types.HardwareAddr) (*dhcpd.Lease, error) {
+	return s.createLease(ctx, managementSubnetID, mac)
+}
+
+// CreateLeaseFromServiceSubnet is
+func (s *SQLite) CreateLeaseFromServiceSubnet(ctx context.Context, mac types.HardwareAddr) (*dhcpd.Lease, error) {
+	return s.createLease(ctx, serviceSubnetID, mac)
 }
 
 // Close closes the database connections.

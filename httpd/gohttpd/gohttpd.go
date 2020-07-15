@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 
 	"go.uber.org/zap"
 
@@ -13,27 +14,37 @@ import (
 
 // GoHTTPd is
 type GoHTTPd struct {
-	addr   string
 	ds     datastore.Datastore
 	logger *zap.Logger
 }
 
 // New is
-func New(addr string, ds datastore.Datastore, logger *zap.Logger) (httpd.HTTPd, error) {
+func New(ds datastore.Datastore, logger *zap.Logger) (httpd.HTTPd, error) {
 	return &GoHTTPd{
-		addr:   addr,
 		ds:     ds,
 		logger: logger,
 	}, nil
 }
 
 // Serve is
-func (g *GoHTTPd) Serve(ctx context.Context) error {
+func (g *GoHTTPd) Serve(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
-	mux.Handle("/ipxe/", g)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.Handle("/", g.loggingHandler(http.NotFoundHandler()))
+	mux.Handle("/ipxe/", g.loggingHandler(g))
+	mux.Handle("/static/", g.loggingHandler(http.StripPrefix("/static/", http.FileServer(http.Dir("static")))))
 
-	return http.ListenAndServe(g.addr, mux)
+	return http.ListenAndServe(addr, mux)
+}
+
+func (g *GoHTTPd) loggingHandler(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.logger.Info("http request log", zap.String("url", r.URL.String()), zap.String("remote", r.RemoteAddr))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+		g.logger.Info("http response log", zap.Int("code", rec.Code))
+		w.WriteHeader(rec.Code)
+		rec.Body.WriteTo(w)
+	})
 }
 
 func (g *GoHTTPd) ServeHTTP(resp http.ResponseWriter, req *http.Request) {

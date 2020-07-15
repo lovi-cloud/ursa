@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/rakyll/statik/fs"
 	"go.uber.org/zap"
 	"go.universe.tf/netboot/tftp"
 
@@ -20,30 +19,23 @@ import (
 
 // Netboot is
 type Netboot struct {
-	addr   string
 	fs     http.FileSystem
 	logger *zap.Logger
 }
 
 // New is
-func New(addr string, logger *zap.Logger) (tftpd.TFTPd, error) {
-	statikFS, err := fs.New()
-	if err != nil {
-		return nil, err
-	}
-
+func New(fs http.FileSystem, logger *zap.Logger) (tftpd.TFTPd, error) {
 	return &Netboot{
-		addr:   addr,
-		fs:     statikFS,
+		fs:     fs,
 		logger: logger,
 	}, nil
 }
 
 // Serve is
-func (n *Netboot) Serve(ctx context.Context) error {
-	l, err := net.ListenPacket("udp4", n.addr)
+func (n *Netboot) Serve(ctx context.Context, addr string) error {
+	l, err := net.ListenPacket("udp4", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", n.addr, err)
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 	defer l.Close()
 

@@ -6,6 +6,38 @@ import (
 	"net"
 )
 
+// IPNet is net.IPNet with the implementation of the Valuer and Scanner interface.
+type IPNet net.IPNet
+
+// Value implements the database/sql/driver Valuer interface.
+func (i IPNet) Value() (driver.Value, error) {
+	return driver.Value(i.String()), nil
+}
+
+// Scan implements the database/sql Scanner interface.
+func (i *IPNet) Scan(src interface{}) error {
+	var ipNet *IPNet
+	var err error
+	switch src := src.(type) {
+	case string:
+		ipNet, err = ParseCIDR(src)
+	case []uint8:
+		ipNet, err = ParseCIDR(fmt.Sprintf("%s", src))
+	default:
+		return fmt.Errorf("incompatible type for IPNet: %T", src)
+	}
+	if err != nil {
+		return err
+	}
+	*i = *ipNet
+	return nil
+}
+
+func (i *IPNet) String() string {
+	ipNet := net.IPNet(*i)
+	return ipNet.String()
+}
+
 // IPMask is net.IPMask with the implementation of the Valuer and Scanner interface.
 type IPMask net.IPMask
 
@@ -139,6 +171,16 @@ func (h *HardwareAddr) Scan(src interface{}) error {
 
 func (h HardwareAddr) String() string {
 	return net.HardwareAddr(h).String()
+}
+
+// ParseCIDR is
+func ParseCIDR(s string) (*IPNet, error) {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil, err
+	}
+	ipNet := IPNet(*n)
+	return &ipNet, nil
 }
 
 // ParseIPMask is

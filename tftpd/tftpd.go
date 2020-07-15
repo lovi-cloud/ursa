@@ -6,5 +6,5 @@ import "context"
 
 // TFTPd is the interface for usra to provide the TFTP daemon.
 type TFTPd interface {
-	Serve(ctx context.Context) error
+	Serve(ctx context.Context, addr string) error
 }

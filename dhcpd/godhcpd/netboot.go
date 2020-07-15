@@ -8,58 +8,48 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/whywaita/ursa/types"
-
 	"go.uber.org/zap"
 	"go.universe.tf/netboot/dhcp4"
 
 	"github.com/whywaita/ursa/datastore"
 	"github.com/whywaita/ursa/dhcpd"
+	"github.com/whywaita/ursa/types"
 )
 
-var errAddressNotFound = fmt.Errorf("failed to find address")
-
-// Netboot is
-type Netboot struct {
-	addr   string
+// GoDHCPd is
+type GoDHCPd struct {
 	ds     datastore.Datastore
 	logger *zap.Logger
 }
 
 // New is
-func New(addr string, ds datastore.Datastore, logger *zap.Logger) (dhcpd.DHCPd, error) {
-	return &Netboot{
-		addr:   addr,
+func New(ds datastore.Datastore, logger *zap.Logger) (dhcpd.DHCPd, error) {
+	return &GoDHCPd{
 		ds:     ds,
 		logger: logger,
 	}, nil
 }
 
 // Serve serve dhcp daemon.
-func (n *Netboot) Serve(ctx context.Context) error {
-	conn, err := dhcp4.NewConn(n.addr)
+func (n *GoDHCPd) Serve(ctx context.Context, addr net.IP, iface string) error {
+	conn, err := dhcp4.NewConn(fmt.Sprintf("%s:67", addr))
 	if err != nil {
 		return fmt.Errorf("failed to create nwe connection: %w", err)
 	}
 	defer conn.Close()
 
 	for {
-		req, intf, err := conn.RecvDHCP()
+		req, riface, err := conn.RecvDHCP()
 		if err != nil {
 			n.logger.Error("failed to receive dhcp request", zap.Error(err))
 			continue
 		}
+		if riface.Name != iface {
+			continue
+		}
 		n.logger.Info("received request", zap.String("req", fmt.Sprintf("%+v", req)))
-		addr, err := getAddr(intf)
-		if err == errAddressNotFound {
-			continue
-		}
-		if err != nil {
-			n.logger.Error("failed to get interface address", zap.Error(err))
-			continue
-		}
 
-		subnet, err := n.ds.GetSubnetByMyAddress(ctx, types.IP(*addr))
+		subnet, err := n.ds.GetManagementSubnet(ctx)
 		if err != nil {
 			n.logger.Error("failed to get subnet", zap.Error(err))
 			continue
@@ -67,18 +57,18 @@ func (n *Netboot) Serve(ctx context.Context) error {
 		var lease *dhcpd.Lease
 		lease, err = n.ds.GetLease(ctx, types.HardwareAddr(req.HardwareAddr))
 		if err != nil && errors.Is(err, sql.ErrNoRows) {
-			lease, err = n.ds.CreateLease(ctx, subnet.ID, types.HardwareAddr(req.HardwareAddr))
+			lease, err = n.ds.CreateLeaseFromManagementSubnet(ctx, types.HardwareAddr(req.HardwareAddr))
 		}
 		if err != nil {
 			n.logger.Error("failed to get lease", zap.Error(err))
 			continue
 		}
-		resp, err := makeResponse(*req, *subnet, *lease)
+		resp, err := makeResponse(addr, *req, *subnet, *lease)
 		if err != nil {
 			n.logger.Error("failed to make response", zap.Error(err))
 			continue
 		}
-		err = conn.SendDHCP(resp, intf)
+		err = conn.SendDHCP(resp, riface)
 		if err != nil {
 			n.logger.Error("failed to send dhcp response", zap.Error(err))
 			continue
@@ -87,8 +77,8 @@ func (n *Netboot) Serve(ctx context.Context) error {
 	}
 }
 
-func makeResponse(req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcpd.Lease) (*dhcp4.Packet, error) {
-	serverAddr := net.IP(subnet.MyAddress).To4()
+func makeResponse(addr net.IP, req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcpd.Lease) (*dhcp4.Packet, error) {
+	serverAddr := addr.To4()
 	yourAddr := net.IP(lease.IPAddress)
 
 	resp := &dhcp4.Packet{
@@ -101,25 +91,29 @@ func makeResponse(req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcpd.Lease) (*dh
 		BootServerName: serverAddr.String(),
 	}
 	options := make(dhcp4.Options)
-	options[dhcp4.OptSubnetMask] = net.IPMask(subnet.Netmask)
+	options[dhcp4.OptSubnetMask] = subnet.Network.Mask
 	options[dhcp4.OptServerIdentifier] = serverAddr
 
-	buff := make([]byte, 4)
-	binary.BigEndian.PutUint32(buff, 4294967295)
-	options[dhcp4.OptLeaseTime] = buff
-
-	options[dhcp4.OptDNSServers] = net.IP(subnet.DNSServer).To4()
-	gw := net.IP(subnet.Gateway).To4()
-	options[dhcp4.OptRouters] = gw
-	options[121] = append(options[121], []byte{0, gw[0], gw[1], gw[2], gw[3]}...)
-
 	options[dhcp4.OptTFTPServer] = serverAddr
-
 	userClass, err := req.Options.String(77)
 	if err == nil && userClass == "iPXE" {
 		options[dhcp4.OptBootFile] = []byte(fmt.Sprintf("http://%s/ipxe/${uuid}", serverAddr.String()))
 	} else {
 		options[dhcp4.OptBootFile] = []byte("ipxe.efi")
+	}
+
+	buff := make([]byte, 4)
+	binary.BigEndian.PutUint32(buff, 4294967295)
+	options[dhcp4.OptLeaseTime] = buff
+
+	if subnet.DNSServer != nil {
+		options[dhcp4.OptDNSServers] = net.IP(*subnet.DNSServer).To4()
+	}
+
+	if subnet.Gateway != nil {
+		gw := net.IP(*subnet.Gateway).To4()
+		options[dhcp4.OptRouters] = gw
+		options[121] = append(options[121], []byte{0, gw[0], gw[1], gw[2], gw[3]}...)
 	}
 
 	resp.Options = options
@@ -134,23 +128,4 @@ func makeResponse(req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcpd.Lease) (*dh
 	return resp, nil
 }
 
-func getAddr(intf *net.Interface) (*net.IP, error) {
-	addrs, err := intf.Addrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface address: %w", err)
-	}
-	var serverAddr *net.IP
-	for _, addr := range addrs {
-		ip, _, err := net.ParseCIDR(addr.String())
-		if err != nil || ip.To4() == nil {
-			continue
-		}
-		serverAddr = &ip
-	}
-	if serverAddr == nil {
-		return nil, errAddressNotFound
-	}
-	return serverAddr, nil
-}
-
-var _ dhcpd.DHCPd = &Netboot{}
+var _ dhcpd.DHCPd = &GoDHCPd{}

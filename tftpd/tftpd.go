@@ -1,4 +1,4 @@
-//go:generate statik -src=./firmware -include=*.efi
+//go:generate statik -m -src=../assets/ipxe
 
 package tftpd
 

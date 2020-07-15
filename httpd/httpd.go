@@ -1,5 +1,3 @@
-//go:generate statik -src=./files
-
 package httpd
 
 import "context"

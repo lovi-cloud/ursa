@@ -2,6 +2,5 @@
 *.yml
 
 /cmd/ursa/ursa
-/tftpd/firmware/ipxe.efi
 
-static/
+/assets

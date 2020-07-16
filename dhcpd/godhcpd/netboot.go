@@ -55,7 +55,7 @@ func (n *GoDHCPd) Serve(ctx context.Context, addr net.IP, iface string) error {
 			continue
 		}
 		var lease *dhcpd.Lease
-		lease, err = n.ds.GetLease(ctx, types.HardwareAddr(req.HardwareAddr))
+		lease, err = n.ds.GetLeaseFromManagementSubnet(ctx, types.HardwareAddr(req.HardwareAddr))
 		if err != nil && errors.Is(err, sql.ErrNoRows) {
 			lease, err = n.ds.CreateLeaseFromManagementSubnet(ctx, types.HardwareAddr(req.HardwareAddr))
 		}
@@ -97,7 +97,7 @@ func makeResponse(addr net.IP, req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcp
 	options[dhcp4.OptTFTPServer] = serverAddr
 	userClass, err := req.Options.String(77)
 	if err == nil && userClass == "iPXE" {
-		options[dhcp4.OptBootFile] = []byte(fmt.Sprintf("http://%s/ipxe/${uuid}", serverAddr.String()))
+		options[dhcp4.OptBootFile] = []byte(fmt.Sprintf("http://%s/ipxe?uuid=${uuid}&mac=${mac:hexhyp}", serverAddr.String()))
 	} else {
 		options[dhcp4.OptBootFile] = []byte("ipxe.efi")
 	}

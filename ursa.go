@@ -35,34 +35,75 @@ func Run(ctx context.Context) error {
 		dsn       string
 		iface     string
 		dhcpRange string
+		staticDir string
+
+		serviceNetwork string
+		serviceRange   string
+		serviceGateway string
+		serviceDNS     string
+		hostnamePrefix string
 	)
 	flags := flag.NewFlagSet(fmt.Sprintf("ursa (v%s rev:%s)", version, revision), flag.ContinueOnError)
 	flags.StringVar(&dsn, "dsn", "file:ursa.db?cache=shared", "sqlite3 dsn")
 	flags.StringVar(&iface, "iface", "eth0", "ursa listening interface")
 	flags.StringVar(&dhcpRange, "dhcp-range", "192.0.2.100:192.0.2.200", "START:END")
+	flags.StringVar(&staticDir, "static-dir", "./static", "static assets directory path")
+	flags.StringVar(&serviceNetwork, "service-nw", "198.51.100.0/24", "service network CIDR")
+	flags.StringVar(&serviceRange, "service-range", "198.51.100.100:198.51.100.200", "START:END")
+	flags.StringVar(&serviceGateway, "service-gw", "198.51.100.1", "service network gateway")
+	flags.StringVar(&serviceDNS, "service-dns", "8.8.8.8", "service network dns server")
+	flags.StringVar(&hostnamePrefix, "hostname-prefix", "cn", "hostname prefix (prefixNNNN)")
 	flags.Parse(os.Args[1:])
 
 	ip, inet, err := getInterfaceAddress(iface)
 	if err != nil {
 		return err
 	}
-	start, end, err := parseDHCPRange(dhcpRange, inet)
+	dhspStart, dhcpEnd, err := parseRange(dhcpRange, inet)
 	if err != nil {
 		return err
 	}
+	_, serviceNet, err := net.ParseCIDR(serviceNetwork)
+	if err != nil {
+		return err
+	}
+	serviceStart, serviceEnd, err := parseRange(serviceRange, serviceNet)
+	if err != nil {
+		return err
+	}
+	serviceGW := net.ParseIP(serviceGateway)
+	if serviceGW == nil {
+		return fmt.Errorf("failed to parse service-gw %s", serviceGateway)
+	}
+	if !serviceNet.Contains(serviceGW) {
+		return fmt.Errorf("invalid service-gw %s", serviceGateway)
+	}
+	dns := net.ParseIP(serviceDNS)
+	if dns == nil {
+		return fmt.Errorf("failed to parse service-dns %s", serviceDNS)
+	}
 
-	ds, err := sqlite.New(ctx, dsn)
+	ds, err := sqlite.New(ctx, dsn, hostnamePrefix)
 	if err != nil {
 		return err
 	}
 	defer ds.Close()
-	_, err = ds.CreateManagementSubnet(ctx, types.IPNet(*inet), types.IP(start), types.IP(end))
+	_, err = ds.CreateManagementSubnet(ctx, types.IPNet(*inet), types.IP(dhspStart), types.IP(dhcpEnd))
 	var sqliteErr sqlite3.Error
 	if errors.As(err, &sqliteErr) {
 		if sqliteErr.ExtendedCode != sqlite3.ErrConstraintPrimaryKey {
 			return err
 		}
 		logger.Warn("management subnet already exists")
+	} else if err != nil {
+		return err
+	}
+	_, err = ds.CreateServiceSubnet(ctx, types.IPNet(*serviceNet), types.IP(serviceStart), types.IP(serviceEnd), types.IP(serviceGW), types.IP(dns))
+	if errors.As(err, &sqliteErr) {
+		if sqliteErr.ExtendedCode != sqlite3.ErrConstraintPrimaryKey {
+			return err
+		}
+		logger.Warn("service subnet already exists")
 	} else if err != nil {
 		return err
 	}
@@ -127,8 +168,8 @@ func getInterfaceAddress(name string) (net.IP, *net.IPNet, error) {
 	return nil, nil, fmt.Errorf("failed to find interface address %s", name)
 }
 
-func parseDHCPRange(dhcpRange string, inet *net.IPNet) (net.IP, net.IP, error) {
-	words := strings.Split(dhcpRange, ":")
+func parseRange(input string, inet *net.IPNet) (net.IP, net.IP, error) {
+	words := strings.Split(input, ":")
 	if len(words) != 2 {
 		return nil, nil, fmt.Errorf("invalid format")
 	}

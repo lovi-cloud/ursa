@@ -97,7 +97,9 @@ func makeResponse(addr net.IP, req dhcp4.Packet, subnet dhcpd.Subnet, lease dhcp
 	options[dhcp4.OptTFTPServer] = serverAddr
 	userClass, err := req.Options.String(77)
 	if err == nil && userClass == "iPXE" {
-		options[dhcp4.OptBootFile] = []byte(fmt.Sprintf("http://%s/ipxe?uuid=${uuid}&mac=${mac:hexhyp}", serverAddr.String()))
+		options[dhcp4.OptBootFile] = []byte(fmt.Sprintf(
+			"http://%s/ipxe?uuid=${uuid}&mac=${mac:hexhyp}&serial=${serial}&product=${product}&manufacturer=${manufacturer}",
+			serverAddr.String()))
 	} else {
 		options[dhcp4.OptBootFile] = []byte("ipxe.efi")
 	}

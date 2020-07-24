@@ -4,12 +4,12 @@ import "github.com/whywaita/ursa/types"
 
 // Subnet is subnet configuration.
 type Subnet struct {
-	ID        int         `yaml:"id" db:"id"`
-	Network   types.IPNet `yaml:"network" db:"network"`
-	Start     types.IP    `yaml:"start" db:"start"`
-	End       types.IP    `yaml:"end" db:"end"`
-	Gateway   *types.IP   `yaml:"gateway" db:"gateway"`
-	DNSServer *types.IP   `yaml:"dns_server" db:"dns_server"`
+	ID        int         `db:"id"`
+	Network   types.IPNet `db:"network"`
+	Start     types.IP    `db:"start"`
+	End       types.IP    `db:"end"`
+	Gateway   *types.IP   `db:"gateway"`
+	DNSServer *types.IP   `db:"dns_server"`
 }
 
 // Lease is

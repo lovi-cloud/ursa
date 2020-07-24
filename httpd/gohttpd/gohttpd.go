@@ -2,11 +2,14 @@ package gohttpd
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/whywaita/ursa/types"
 
@@ -62,16 +65,22 @@ func (g *GoHTTPd) ipxeHandler() http.Handler {
 		hostID, err := uuid.FromString(r.URL.Query().Get("uuid"))
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to get uuid", zap.Error(err))
 			return
 		}
 		mac, err := net.ParseMAC(r.URL.Query().Get("mac"))
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to get mac", zap.Error(err))
 			return
 		}
-		err = registerHostIfNotExists(r.Context(), g.ds, types.HardwareAddr(mac), hostID)
+		serial := r.URL.Query().Get("serial")
+		product := r.URL.Query().Get("product")
+		manufacturer := r.URL.Query().Get("manufacturer")
+		err = registerHostIfNotExists(r.Context(), g.ds, types.HardwareAddr(mac), hostID, serial, product, manufacturer)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			g.logger.Error("failed to register host", zap.Error(err))
 			return
 		}
 		err = tmpl.Execute(w, ipxeParams{
@@ -82,6 +91,7 @@ func (g *GoHTTPd) ipxeHandler() http.Handler {
 		})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			g.logger.Error("failed to exec template", zap.Error(err))
 			return
 		}
 		return
@@ -90,38 +100,113 @@ func (g *GoHTTPd) ipxeHandler() http.Handler {
 
 func (g *GoHTTPd) metadataHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tmp := `hostname: cn0001
-#instance-action: none
-instance-id: i-87018aed
-instance-type: isucon.isucon
-local-hostname: cn0001.internal.isucon.net
-local-ipv4: 192.168.0.100
-placement: {availability-zone: japan-01}
-public-ipv4: 157.112.67.126
-`
-		w.Write([]byte(tmp))
+		addr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to resolve address", zap.Error(err))
+			return
+		}
+		h, err := g.ds.GetHostByAddress(r.Context(), types.IP(addr.IP))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to get host by address", zap.Error(err))
+			return
+		}
+		out := fmt.Sprintf("hostname: %s\n", h.Name)
+		w.Write([]byte(out))
 	})
 }
 
 func (g *GoHTTPd) userdataHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tmp := `#cloud-config
-`
-		w.Write([]byte(tmp))
+		addr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to resolve address", zap.Error(err))
+			return
+		}
+		h, err := g.ds.GetHostByAddress(r.Context(), types.IP(addr.IP))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to get host by address", zap.Error(err))
+			return
+		}
+		l, err := g.ds.GetLeaseByID(r.Context(), h.ServiceLeaseID)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to get lease by id", zap.Error(err))
+			return
+		}
+		config := config{
+			ManageEtcHosts: true,
+			RunCMD: []string{
+				"echo \"dash dash/sh boolean false\" | debconf-set-selections",
+				"DEBIAN_FRONTEND=noninteractive dpkg-reconfigure dash",
+				"echo \"configure system description '$(dmidecode -s system-serial-number)'\" >> /etc/lldpd.conf",
+				"systemctl restart lldpd",
+				fmt.Sprintf("wget http://%s/static/ursa-bonder -O /tmp/ursa-bonder", r.Host),
+				"chmod +x /tmp/ursa-bonder",
+				"pkill dhclient",
+				fmt.Sprintf("/tmp/ursa-bonder -driver %s -vlan %d -addr %s -mask %s -gw %s -dns %s",
+					"e1000e", 1000, l.IPAddress, net.IP(l.Network.Mask), l.Gateway, l.DNSServer),
+			},
+			FQDN:     h.Name,
+			Hostname: h.Name,
+		}
+
+		us, err := g.ds.ListUser(r.Context())
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusInternalServerError)
+			g.logger.Error("failed to list user", zap.Error(err))
+			return
+		}
+		for _, u := range us {
+			ks, err := g.ds.ListKeyByUserID(r.Context(), u.ID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				g.logger.Error("failed to list key by user_id", zap.Error(err))
+				return
+			}
+			var keys []string
+			for _, k := range ks {
+				keys = append(keys, k.Key)
+			}
+			config.Users = append(config.Users, user{
+				Name:              u.Name,
+				Sudo:              "ALL=(ALL) NOPASSWD:ALL",
+				Groups:            "users, admin",
+				SSHAuthorizedKeys: keys,
+			})
+		}
+		out, err := yaml.Marshal(config)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			g.logger.Error("failed to parse yaml", zap.Error(err))
+			return
+		}
+		out = append([]byte("#cloud-config\n"), out...)
+		w.Write(out)
 	})
 }
 
-func registerHostIfNotExists(ctx context.Context, ds datastore.Datastore, mac types.HardwareAddr, hostID uuid.UUID) error {
+func registerHostIfNotExists(ctx context.Context, ds datastore.Datastore, mac types.HardwareAddr, hostID uuid.UUID, serial, product, manufacturer string) error {
 	var sqliteErr sqlite3.Error
 
-	lease, err := ds.CreateLeaseFromServiceSubnet(ctx, mac)
+	managementLease, err := ds.GetLeaseFromManagementSubnet(ctx, mac)
+	if err != nil {
+		return err
+	}
+
+	serviceLease, err := ds.CreateLeaseFromServiceSubnet(ctx, mac)
 	if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	_, err = ds.RegisterHost(ctx, hostID, lease.ID)
+	_, err = ds.RegisterHost(ctx, hostID, serial, product, manufacturer, serviceLease.ID, managementLease.ID)
 	if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 		return nil
 	} else if err != nil {
@@ -129,4 +214,19 @@ func registerHostIfNotExists(ctx context.Context, ds datastore.Datastore, mac ty
 	}
 
 	return nil
+}
+
+type config struct {
+	ManageEtcHosts bool     `yaml:"manage_etc_hosts"`
+	FQDN           string   `yaml:"fqdn"`
+	Hostname       string   `yaml:"hostname"`
+	Users          []user   `yaml:"users"`
+	RunCMD         []string `yaml:"runcmd"`
+}
+
+type user struct {
+	Name              string   `yaml:"name"`
+	Sudo              string   `yaml:"sudo"`
+	Groups            string   `yaml:"groups"`
+	SSHAuthorizedKeys []string `yaml:"ssh_authorized_keys"`
 }

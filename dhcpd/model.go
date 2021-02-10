@@ -1,6 +1,6 @@
 package dhcpd
 
-import "github.com/whywaita/ursa/types"
+import "github.com/lovi-cloud/ursa/types"
 
 // Subnet is subnet configuration.
 type Subnet struct {

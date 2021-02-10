@@ -5,9 +5,9 @@ import (
 
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/whywaita/ursa/dhcpd"
-	"github.com/whywaita/ursa/httpd"
-	"github.com/whywaita/ursa/types"
+	"github.com/lovi-cloud/ursa/dhcpd"
+	"github.com/lovi-cloud/ursa/httpd"
+	"github.com/lovi-cloud/ursa/types"
 )
 
 // Datastore is an interface for usra to perform CRUD operations.

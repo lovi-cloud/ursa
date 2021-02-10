@@ -1,6 +1,6 @@
-module github.com/whywaita/ursa
+module github.com/lovi-cloud/ursa
 
-go 1.14
+go 1.15
 
 require (
 	github.com/jmoiron/sqlx v1.2.0

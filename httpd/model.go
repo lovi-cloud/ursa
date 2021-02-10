@@ -3,7 +3,7 @@ package httpd
 import (
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/whywaita/ursa/types"
+	"github.com/lovi-cloud/ursa/types"
 )
 
 // Host is

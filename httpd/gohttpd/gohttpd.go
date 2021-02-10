@@ -10,17 +10,14 @@ import (
 	"net/http/httptest"
 
 	yaml "gopkg.in/yaml.v2"
-
-	"github.com/whywaita/ursa/types"
-
 	sqlite3 "github.com/mattn/go-sqlite3"
-
 	uuid "github.com/satori/go.uuid"
 
 	"go.uber.org/zap"
 
-	"github.com/whywaita/ursa/datastore"
-	"github.com/whywaita/ursa/httpd"
+	"github.com/lovi-cloud/ursa/datastore"
+	"github.com/lovi-cloud/ursa/types"
+	"github.com/lovi-cloud/ursa/httpd"
 )
 
 // GoHTTPd is

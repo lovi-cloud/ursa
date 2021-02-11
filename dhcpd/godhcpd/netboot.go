@@ -11,9 +11,9 @@ import (
 	"go.uber.org/zap"
 	"go.universe.tf/netboot/dhcp4"
 
-	"github.com/whywaita/ursa/datastore"
-	"github.com/whywaita/ursa/dhcpd"
-	"github.com/whywaita/ursa/types"
+	"github.com/lovi-cloud/ursa/datastore"
+	"github.com/lovi-cloud/ursa/dhcpd"
+	"github.com/lovi-cloud/ursa/types"
 )
 
 // GoDHCPd is

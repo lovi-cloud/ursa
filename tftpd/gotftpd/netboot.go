@@ -12,9 +12,9 @@ import (
 	"go.universe.tf/netboot/tftp"
 
 	// import ipxe.efi
-	_ "github.com/whywaita/ursa/tftpd/statik"
+	_ "github.com/lovi-cloud/ursa/tftpd/statik"
 
-	"github.com/whywaita/ursa/tftpd"
+	"github.com/lovi-cloud/ursa/tftpd"
 )
 
 // Netboot is

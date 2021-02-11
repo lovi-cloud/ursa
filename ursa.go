@@ -13,15 +13,15 @@ import (
 
 	"github.com/rakyll/statik/fs"
 
-	"github.com/whywaita/ursa/types"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/whywaita/ursa/datastore/sqlite"
-	"github.com/whywaita/ursa/dhcpd/godhcpd"
-	"github.com/whywaita/ursa/httpd/gohttpd"
-	"github.com/whywaita/ursa/tftpd/gotftpd"
+	"github.com/lovi-cloud/ursa/datastore/sqlite"
+	"github.com/lovi-cloud/ursa/types"
+	"github.com/lovi-cloud/ursa/dhcpd/godhcpd"
+	"github.com/lovi-cloud/ursa/httpd/gohttpd"
+	"github.com/lovi-cloud/ursa/tftpd/gotftpd"
 )
 
 // Run the ursa

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/whywaita/ursa"
+	"github.com/lovi-cloud/ursa"
 )
 
 func main() {

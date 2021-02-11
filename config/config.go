@@ -5,7 +5,7 @@ import (
 
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/whywaita/ursa/dhcpd"
+	"github.com/lovi-cloud/ursa/dhcpd"
 )
 
 // Config is usra config struct.

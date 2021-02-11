@@ -8,16 +8,16 @@ import (
 	"net"
 
 	uuid "github.com/satori/go.uuid"
-	"github.com/whywaita/ursa/httpd"
 
 	// SQLite driver
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/whywaita/ursa/datastore"
-	"github.com/whywaita/ursa/dhcpd"
-	"github.com/whywaita/ursa/types"
+	"github.com/lovi-cloud/ursa/datastore"
+	"github.com/lovi-cloud/ursa/dhcpd"
+	"github.com/lovi-cloud/ursa/httpd"
+	"github.com/lovi-cloud/ursa/types"
 )
 
 const (

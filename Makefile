@@ -8,7 +8,7 @@ cmd/ursa/static/ursa-bonder:
 	go build -o ./cmd/ursa/static/ursa-bonder ./cmd/ursa-bonder
 
 cmd/ursa/ursa:
-	go build -o ./cmd/ursa/ursa ./cmd/ursa
+	go build -o ./cmd/ursa/ursa -ldflags $(BUILD_LDFLAGS) ./cmd/ursa
 
 clean:
 	rm -rf ./cmd/ursa/ursa ./cmd/ursa/static/ursa-bonder

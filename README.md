@@ -2,6 +2,10 @@
 
 ![logo](./docs/image/ursa-logo.png)
 
+ursa is management daemon for bare-metal.
+
+The name "ursa" is derived from a Latin word that means "bear". 
+
 ## Feature
 
 - manage bare-metal server
